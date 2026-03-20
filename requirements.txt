@@ -9,4 +9,4 @@ streamlit
 matplotlib
 seaborn
 SQLAlchemy
-plotly==0.13.1
+plotly
