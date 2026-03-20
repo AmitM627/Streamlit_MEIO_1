@@ -48,6 +48,43 @@ class SupplyChainEngine:
         # Build network topology
         self._build_network_topology()
         
+        # Precompute lookup dictionaries for O(1) performance in inner loops
+        self._precompute_lookups()
+        
+    def _precompute_lookups(self):
+        """Precompute lookup dictionaries from DataFrames to accelerate optimization loops."""
+        # Policies: (NodeID, SKU) -> ReviewPeriod
+        self.policy_dict = {}
+        for _, r in self.policies.iterrows():
+            self.policy_dict[(r['NodeID'], r['SKU'])] = r['ReviewPeriod']
+            
+        # Costs: (NodeID, SKU) -> {Holding, Ordering, Shortage}
+        self.costs_dict = {}
+        for _, r in self.costs.iterrows():
+            self.costs_dict[(r['NodeID'], r['SKU'])] = {
+                'HoldingCostPerUnit': r['HoldingCostPerUnit'],
+                'OrderingCost': r['OrderingCost'],
+                'ShortageCostPerUnit': r['ShortageCostPerUnit']
+            }
+            
+        # Lead times: (Origin, Destination, SKU) -> LeadTimeMean
+        self.lt_dict = {}
+        for _, r in self.leadtimes.iterrows():
+            self.lt_dict[(r['Origin'], r['Destination'], r['SKU'])] = r['LeadTimeMean']
+            
+        # Transport: (Origin, Destination, SKU) -> {Fixed, Variable}
+        self.transport_dict = {}
+        for _, r in self.transport.iterrows():
+            self.transport_dict[(r['Origin'], r['Destination'], r['SKU'])] = {
+                'FixedCostPerShipment': r['FixedCostPerShipment'],
+                'VariableCostPerUnit': r['VariableCostPerUnit']
+            }
+            
+        # Service Targets: (NodeID, SKU) -> TargetFillRate
+        self.service_dict = {}
+        for _, r in self.service_targets.iterrows():
+            self.service_dict[(r['NodeID'], r['SKU'])] = r['TargetFillRate']
+        
     def _parse_simulation_params(self):
         """Extract simulation parameters from input DataFrame."""
         params = self.simulation_params.set_index('Parameter')['Value'].to_dict()
@@ -213,14 +250,8 @@ class SupplyChainEngine:
             alpha = sourcing_shares.get(key, 0.0)
             
             # Get lead time
-            lt_row = self.leadtimes[
-                (self.leadtimes['Origin'] == parent) &
-                (self.leadtimes['Destination'] == node) &
-                (self.leadtimes['SKU'] == sku)
-            ]
-            
-            if not lt_row.empty:
-                lt_mean = lt_row.iloc[0]['LeadTimeMean']
+            lt_mean = self.lt_dict.get((parent, node, sku))
+            if lt_mean is not None:
                 total_lt += alpha * lt_mean
         
         return total_lt
@@ -341,12 +372,9 @@ class SupplyChainEngine:
             Dictionary of cost components
         """
         # Get cost parameters
-        cost_row = self.costs[
-            (self.costs['NodeID'] == node) &
-            (self.costs['SKU'] == sku)
-        ]
+        cost_info = self.costs_dict.get((node, sku))
         
-        if cost_row.empty:
+        if cost_info is None:
             return {
                 'holding': 0.0,
                 'ordering': 0.0,
@@ -355,9 +383,9 @@ class SupplyChainEngine:
                 'total': 0.0
             }
         
-        h = cost_row.iloc[0]['HoldingCostPerUnit']  # Weekly holding cost
-        K = cost_row.iloc[0]['OrderingCost']  # Fixed ordering cost
-        p = cost_row.iloc[0]['ShortageCostPerUnit']  # Shortage penalty
+        h = cost_info['HoldingCostPerUnit']  # Weekly holding cost
+        K = cost_info['OrderingCost']  # Fixed ordering cost
+        p = cost_info['ShortageCostPerUnit']  # Shortage penalty
         
         # Holding cost
         holding_cost = h * (safety_stock + cycle_stock)
@@ -380,15 +408,12 @@ class SupplyChainEngine:
             key = (parent, node, sku)
             alpha = sourcing_shares.get(key, 0.0)
             
-            transport_row = self.transport[
-                (self.transport['Origin'] == parent) &
-                (self.transport['Destination'] == node) &
-                (self.transport['SKU'] == sku)
-            ]
             
-            if not transport_row.empty and alpha > 0:
-                fixed_cost = transport_row.iloc[0]['FixedCostPerShipment']
-                var_cost = transport_row.iloc[0]['VariableCostPerUnit']
+            transport_info = self.transport_dict.get((parent, node, sku))
+            
+            if transport_info is not None and alpha > 0:
+                fixed_cost = transport_info['FixedCostPerShipment']
+                var_cost = transport_info['VariableCostPerUnit']
                 
                 # Flow quantity
                 flow_qty = demand_mean * alpha
@@ -443,11 +468,7 @@ class SupplyChainEngine:
             z = z_values.get((node, sku), 1.65)  # Default z=1.65 (95% service)
             
             # Get review period
-            policy_row = self.policies[
-                (self.policies['NodeID'] == node) &
-                (self.policies['SKU'] == sku)
-            ]
-            review_period = policy_row.iloc[0]['ReviewPeriod'] if not policy_row.empty else 1.0
+            review_period = self.policy_dict.get((node, sku), 1.0)
             
             # Calculate lead time
             lead_time = self.calculate_effective_leadtime(node, sku, sourcing_shares)
@@ -485,13 +506,8 @@ class SupplyChainEngine:
                 })
             
             # 2. Service level target
-            service_target_row = self.service_targets[
-                (self.service_targets['NodeID'] == node) &
-                (self.service_targets['SKU'] == sku)
-            ]
-            
-            if not service_target_row.empty:
-                target = service_target_row.iloc[0]['TargetFillRate']
+            target = self.service_dict.get((node, sku))
+            if target is not None:
                 if fill_rate < target - 0.001:  # Small tolerance
                     violations.append({
                         'type': 'ServiceLevel',
@@ -615,14 +631,11 @@ class SupplyChainEngine:
                 inventory[key] += order_qty
                 
                 # Costs
-                cost_row = self.costs[
-                    (self.costs['NodeID'] == node) &
-                    (self.costs['SKU'] == sku)
-                ]
+                cost_info = self.costs_dict.get((node, sku))
                 
-                if not cost_row.empty:
-                    h = cost_row.iloc[0]['HoldingCostPerUnit']
-                    p = cost_row.iloc[0]['ShortageCostPerUnit']
+                if cost_info is not None:
+                    h = cost_info['HoldingCostPerUnit']
+                    p = cost_info['ShortageCostPerUnit']
                     
                     week_holding_cost += h * inventory[key]
                     week_shortage_cost += p * shortage
@@ -725,13 +738,10 @@ class InteractiveSimulator:
             order_qty = base_stock - self.inventory[key]
             self.inventory[key] += order_qty
             
-            cost_row = self.engine.costs[
-                (self.engine.costs['NodeID'] == node) &
-                (self.engine.costs['SKU'] == sku)
-            ]
+            cost_info = self.engine.costs_dict.get((node, sku))
             
-            h = cost_row.iloc[0]['HoldingCostPerUnit'] if not cost_row.empty else 0.0
-            p = cost_row.iloc[0]['ShortageCostPerUnit'] if not cost_row.empty else 0.0
+            h = cost_info['HoldingCostPerUnit'] if cost_info is not None else 0.0
+            p = cost_info['ShortageCostPerUnit'] if cost_info is not None else 0.0
             
             hc = h * self.inventory[key]
             sc = p * shortage
