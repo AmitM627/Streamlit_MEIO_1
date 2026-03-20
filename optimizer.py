@@ -4,6 +4,7 @@ Optimizer: Constraint-Aware Genetic Algorithm for MEIO
 
 import numpy as np
 import pandas as pd
+import time
 from typing import Dict, List, Tuple, Optional, Callable
 from dataclasses import dataclass
 import copy
@@ -333,6 +334,9 @@ class GeneticOptimizer:
                     population[0].analytical_result['num_violations']
                 )
             
+            # Yield the GIL to prevent Streamlit websocket timeout during heavy processing
+            time.sleep(0.01)
+            
             # Elitism: keep best individuals
             elite_count = max(1, int(self.config.elite_fraction * self.config.population_size))
             new_population = population[:elite_count]
@@ -377,6 +381,8 @@ class GeneticOptimizer:
         
         for i, chromosome in enumerate(top_candidates):
             self._evaluate_simulation(chromosome)
+            # Yield the GIL to prevent Streamlit websocket timeout
+            time.sleep(0.01)
         
         # Select best based on simulation
         top_candidates.sort(key=lambda c: c.simulated_fitness if c.simulated_fitness else float('inf'))
