@@ -1,7 +1,12 @@
 streamlit==1.31.0
 pandas==2.1.4
 numpy==1.26.3
-scipy==1.11.4
-openpyxl==3.1.2
-matplotlib==3.8.2
-seaborn==0.13.1
+pandas
+numpy
+scipy
+openpyxl
+streamlit
+matplotlib
+seaborn
+SQLAlchemy
+plotly==0.13.1
