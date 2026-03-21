@@ -24,50 +24,12 @@ st.set_page_config(
 )
 
 # Styling
-st.markdown("""
-    <style>
-    .main-header {
-        font-size: 2.8rem;
-        font-weight: 800;
-        background: -webkit-linear-gradient(#3498db, #9b59b6);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        margin-bottom: 0.5rem;
-    }
-    .sub-header {
-        font-size: 1.2rem;
-        color: #A0A0A0;
-        margin-bottom: 2rem;
-        font-weight: 400;
-    }
-    div[data-testid="metric-container"] {
-        background-color: #1E1E1E;
-        border: 1px solid #333;
-        padding: 1.2rem;
-        border-radius: 0.8rem;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-    div[data-testid="metric-container"]:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 12px rgba(52, 152, 219, 0.25);
-        border: 1px solid #3498db;
-    }
-    .stTabs [data-baseweb="tab-list"] {
-        gap: 10px;
-    }
-    .stTabs [data-baseweb="tab"] {
-        border-radius: 4px 4px 0px 0px;
-        background-color: #121212;
-        padding-top: 10px;
-        padding-bottom: 10px;
-    }
-    .stTabs [aria-selected="true"] {
-        background-color: #1E1E1E !important;
-        border-bottom: 2px solid #3498db !important;
-    }
-    </style>
-""", unsafe_allow_html=True)
+try:
+    with open("assets/style.css", "r") as f:
+        css = f.read()
+    st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+except FileNotFoundError:
+    st.warning("Could not load assets/style.css")
 
 
 def create_template_excel() -> BytesIO:
@@ -929,6 +891,8 @@ def main():
                     "Avg Fill Rate",
                     f"{avg_fill_rate:.1%}"
                 )
+
+
 
             # Visualizations
             st.markdown("---")
